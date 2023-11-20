@@ -32,9 +32,4 @@ jobs:
         with:
           node-version: "14"
           cache: "yarn"
-      - run: yarn
-      - run: yarn sync_global
-        timeout-minutes: 5
-      - uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: Save Garmin Session
+      
