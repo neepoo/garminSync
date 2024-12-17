@@ -247,4 +247,7 @@ tail -100f /var/log/dailysync.log
 
 3. 2024-05-24: re-enable github actions
 
-4. 2024-10-10: re-enable github actions 
+4. 2024-10-10: re-enable github actions
+
+5. 2024-12-17: re-enable github actions
+6. 
