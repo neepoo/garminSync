@@ -12,7 +12,7 @@ import { GarminClientType } from './type';
 import { number2capital } from './number_tricks';
 const core = require('@actions/core');
 import _ from 'lodash';
-import { getSessionFromDB, initDB, saveSessionToDB, updateSessionToDB } from './sqlite';
+import { getTokenSessionFromDB, initDB, upsertSessionToDB } from './sqlite';
 
 const CryptoJS = require('crypto-js');
 const fs = require('fs');
@@ -36,25 +36,30 @@ export const getGaminCNClient = async (): Promise<GarminClientType> => {
 
     try {
         await initDB();
+        const persistSession = async () => upsertSessionToDB('CN', GCClient.exportToken());
+        let userInfo;
 
-        const currentSession = await getSessionFromDB('CN');
+        const currentSession = await getTokenSessionFromDB('CN');
         if (!currentSession) {
             await GCClient.login();
-            await saveSessionToDB('CN', GCClient.exportToken());
+            await persistSession();
+            userInfo = await GCClient.getUserProfile();
         } else {
             //  Wrap error message in GCClient, prevent terminate in github actions.
             try {
                 console.log('GarminCN: login by saved session');
-                await GCClient.loadToken(currentSession.oauth1, currentSession.oauth2);
+                GCClient.loadToken(currentSession.oauth1, currentSession.oauth2);
+                userInfo = await GCClient.getUserProfile();
+                await persistSession();
             } catch (e) {
                 console.log('Warn: renew  GarminCN Session..');
-                await GCClient.login(GARMIN_USERNAME, GARMIN_PASSWORD);
-                await updateSessionToDB('CN', GCClient.sessionJson);
+                await GCClient.login();
+                await persistSession();
+                userInfo = await GCClient.getUserProfile();
             }
 
         }
 
-        const userInfo = await GCClient.getUserProfile();
         const { fullName, userName: emailAddress, location } = userInfo;
         if (!fullName) {
             throw Error('佳明中国区登录失败')
@@ -64,7 +69,8 @@ export const getGaminCNClient = async (): Promise<GarminClientType> => {
         return GCClient;
     } catch (err) {
         console.error(err);
-        core.setFailed(err);
+        core.setFailed(err instanceof Error ? err.message : String(err));
+        throw err;
     }
 };
 
