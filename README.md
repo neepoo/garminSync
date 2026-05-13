@@ -167,6 +167,7 @@ PING sso.garmin.cn (61.150.74.194) 56(84) bytes of data.
 ### 安装 `NodeJS`
 
 下载地址 [https://nodejs.org/en/](https://nodejs.org/en/)
+建议使用 `Node.js 20` 或更高版本。当前 GitHub Actions 也已切到 `Node 20`，本地如果要运行 `yarn bootstrap_garmin_global_token`，同样需要 `Node 18+`。
 
 ### 开启 `yarn`
 
