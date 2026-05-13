@@ -12,7 +12,8 @@ import { GarminClientType } from './type';
 import { number2capital } from './number_tricks';
 const core = require('@actions/core');
 import _ from 'lodash';
-import { getTokenSessionFromDB, initDB, upsertSessionToDB } from './sqlite';
+import { getTokenSecretName, getTokenSessionFromDB, getTokenSessionFromEnv, initDB, upsertSessionToDB } from './sqlite';
+import { withGarminRateLimitRetry } from './garmin_rate_limit';
 
 const CryptoJS = require('crypto-js');
 const fs = require('fs');
@@ -26,38 +27,53 @@ const GARMIN_MIGRATE_START = process.env.GARMIN_MIGRATE_START ?? GARMIN_MIGRATE_
 const GARMIN_SYNC_NUM = process.env.GARMIN_SYNC_NUM ?? GARMIN_SYNC_NUM_DEFAULT;
 
 export const getGaminCNClient = async (): Promise<GarminClientType> => {
-    if (_.isEmpty(GARMIN_USERNAME) || _.isEmpty(GARMIN_PASSWORD)) {
-        const errMsg = '请填写中国区用户名及密码：GARMIN_USERNAME,GARMIN_PASSWORD';
-        core.setFailed(errMsg);
-        return Promise.reject(errMsg);
-    }
-
     const GCClient = new GarminConnect({username: GARMIN_USERNAME, password: GARMIN_PASSWORD}, 'garmin.cn');
 
     try {
         await initDB();
         const persistSession = async () => upsertSessionToDB('CN', GCClient.exportToken());
+        const loadReusableToken = async (source: string, session: { oauth1: Record<string, any>, oauth2: Record<string, any> }) => {
+            console.log(`GarminCN: login by ${source}`);
+            GCClient.loadToken(session.oauth1, session.oauth2);
+            const loadedUserInfo = await withGarminRateLimitRetry(
+                `GarminCN ${source}`,
+                async () => GCClient.getUserProfile(),
+            );
+            await persistSession();
+            return loadedUserInfo;
+        };
         let userInfo;
 
         const currentSession = await getTokenSessionFromDB('CN');
-        if (!currentSession) {
-            await GCClient.login();
-            await persistSession();
-            userInfo = await GCClient.getUserProfile();
-        } else {
-            //  Wrap error message in GCClient, prevent terminate in github actions.
+        if (currentSession) {
             try {
-                console.log('GarminCN: login by saved session');
-                GCClient.loadToken(currentSession.oauth1, currentSession.oauth2);
-                userInfo = await GCClient.getUserProfile();
-                await persistSession();
+                userInfo = await loadReusableToken('saved session', currentSession);
             } catch (e) {
-                console.log('Warn: renew  GarminCN Session..');
-                await GCClient.login();
-                await persistSession();
-                userInfo = await GCClient.getUserProfile();
+                console.log('Warn: saved GarminCN session expired.');
+            }
+        }
+
+        const secretSession = getTokenSessionFromEnv('CN');
+        if (!userInfo && secretSession) {
+            try {
+                userInfo = await loadReusableToken(getTokenSecretName('CN'), secretSession);
+            } catch (e) {
+                console.log(`Warn: ${getTokenSecretName('CN')} expired or invalid.`);
+            }
+        }
+
+        if (!userInfo) {
+            if (_.isEmpty(GARMIN_USERNAME) || _.isEmpty(GARMIN_PASSWORD)) {
+                const errMsg = `请填写中国区用户名及密码：GARMIN_USERNAME,GARMIN_PASSWORD，或配置 ${getTokenSecretName('CN')}`;
+                core.setFailed(errMsg);
+                return Promise.reject(errMsg);
             }
 
+            userInfo = await withGarminRateLimitRetry('GarminCN login', async () => {
+                await GCClient.login();
+                await persistSession();
+                return GCClient.getUserProfile();
+            });
         }
 
         const { fullName, userName: emailAddress, location } = userInfo;
@@ -82,7 +98,10 @@ export const migrateGarminCN2GarminGlobal = async (count = 200) => {
     const clientCN = await getGaminCNClient();
     const clientGlobal = await getGaminGlobalClient();
 
-    const actSlices = await clientCN.getActivities(actIndex, totalAct);
+    const actSlices = await withGarminRateLimitRetry(
+        'migrateGarminCN2GarminGlobal:getActivities',
+        async () => clientCN.getActivities(actIndex, totalAct),
+    );
     // only running
     // const runningActs = _.filter(actSlices, { activityType: { typeKey: 'running' } });
 
@@ -103,8 +122,14 @@ export const syncGarminCN2GarminGlobal = async () => {
     const clientCN = await getGaminCNClient();
     const clientGlobal = await getGaminGlobalClient();
 
-    let cnActs = await clientCN.getActivities(0, Number(GARMIN_SYNC_NUM));
-    const globalActs = await clientGlobal.getActivities(0, 1);
+    let cnActs = await withGarminRateLimitRetry(
+        'syncGarminCN2GarminGlobal:getCnActivities',
+        async () => clientCN.getActivities(0, Number(GARMIN_SYNC_NUM)),
+    );
+    const globalActs = await withGarminRateLimitRetry(
+        'syncGarminCN2GarminGlobal:getGlobalActivities',
+        async () => clientGlobal.getActivities(0, 1),
+    );
 
     const latestGlobalActStartTime = globalActs[0]?.startTimeLocal ?? '0';
     const latestCnActStartTime = cnActs[0]?.startTimeLocal ?? '0';

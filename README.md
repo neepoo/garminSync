@@ -1,7 +1,5 @@
 # 佳明运动数据同步与采集工具
 
-
-
 ![workflow](./assets/workflow.png)
 
 <a style="display:inline-block;background-color:#FC5200;color:#fff;padding:5px 10px 5px 30px;font-size:11px;font-family:Helvetica, Arial, sans-serif;white-space:nowrap;text-decoration:none;background-repeat:no-repeat;background-position:10px center;border-radius:3px;background-image:url('https://badges.strava.com/logo-strava-echelon.png')" href='https://strava.com/athletes/84396978' target="_clean">
@@ -13,30 +11,92 @@
 
 [![](https://img.shields.io/badge/-Telegram-%2326A5E4?style=flat-square&logo=telegram&logoColor=ffffff)](https://t.me/garmindailysync)
 
-
 ## Web版本
+
 如果你不熟悉代码，强烈推荐使用这个版本，在网页上填入账号点击就能同步数据，简洁好用。
 [https://dailysync.vyzt.dev/](https://dailysync.vyzt.dev/)
 
-
 ## Github运行方案
-因为项目之前在Github上占用过多资源被封禁，现在已经调整了执行的频率，熟悉代码的话，将代码下载下来，上传到github，通过 github Actions执行
+
+因为项目之前在Github上占用过多资源被封禁，现在已经调整了执行的频率，熟悉代码的话，将代码下载下来，上传到github，通过 github
+Actions执行
 具体参考下方文档或参考视频教程: https://www.bilibili.com/video/BV1v94y1Q7oR/?spm_id_from=333.999.0.0
 
 ## 使用前账号准备与配置
 
-【重要重要重要！！！】请先参照 [账号准备](https://dailysync.vyzt.dev/docs/%E8%B4%A6%E5%8F%B7%E5%87%86%E5%A4%87) 进行账号配置，再来使用此工具
+【重要重要重要！！！】请先参照 [账号准备](https://dailysync.vyzt.dev/docs/%E8%B4%A6%E5%8F%B7%E5%87%86%E5%A4%87)
+进行账号配置，再来使用此工具
+
+## GitHub Actions 429 解决方案（Garmin Global 推荐）
+
+Garmin 最近会对 GitHub Actions 里的自动化 Garmin Global 登录直接限流，典型报错是：
+
+```text
+ERROR: (429), Too Many Requests, "Rate limited"
+... oauth-service/oauth/preauthorized ...
+```
+
+这个仓库现在支持把 Garmin Global 的 `oauth1/oauth2` token 作为 Secret 注入，GitHub Actions 只复用 token，不再在 CI
+里调用账号密码登录。
+
+### 第一次初始化流程
+
+1. 本地安装依赖
+
+```shell
+yarn
+```
+
+2. 安装 Playwright 浏览器
+
+```shell
+npx playwright install chromium
+```
+
+3. 本地运行 token 引导脚本
+
+```shell
+yarn bootstrap_garmin_global_token
+```
+
+4. 浏览器会自动打开，请在真实浏览器中完成 Garmin Global 登录。
+5. 脚本成功后会在终端打印一整段 Base64 字符串。
+6. 到 GitHub 仓库 `Settings -> Secrets and variables -> Actions`，新增 Secret：
+
+```text
+GARMIN_GLOBAL_TOKEN_B64
+```
+
+7. 将刚才整段 Base64 内容粘贴进去保存。
+8. 重新手动执行 `Sync Garmin CN to Garmin Global` workflow。
+
+### 之后的运行方式
+
+- GitHub Actions 中优先使用仓库里的 `db/garmin.db` 已保存 session。
+- 如果仓库里的 session 失效，会自动回退到 `GARMIN_GLOBAL_TOKEN_B64`。
+- GitHub Actions 中不再回退到 `GARMIN_GLOBAL_USERNAME/GARMIN_GLOBAL_PASSWORD` 登录，因此不会再去撞最容易触发 429 的登录换
+  token 接口。
+- 如果 `GARMIN_GLOBAL_TOKEN_B64` 也失效了，workflow 会明确报错，并提示你重新执行 `yarn bootstrap_garmin_global_token` 更新
+  Secret。
 
 ## 本地运行方案
+
 首先确保运行此脚本的机器能够访问国际互联网, 如国外VPS、家庭全局科学的环境等， 否则无法正常登录佳明国际区
 
 ## 检查网络情况确保正常访问佳明服务
 
 ### 测试国际互联网网络连通性
+
 ```shell
 wget google.com
 ```
-执行后确保相应的数据类似如下再进行下面步骤，否则请检查网络环境（命令行也需要能访问国际互联网, 如果google在浏览器能正常访问，但是命令行无法ping通，google搜索关键词**命令行翻墙**，参考配置一下重试。） 如果用的时Clash，在左侧 General 下，将 TUN Mode 模式开启也可。
+
+如果你主要通过 GitHub Actions 跑 Garmin Global 同步，推荐不要依赖 CI 里的账号密码登录，而是按上面的流程配置
+`GARMIN_GLOBAL_TOKEN_B64`。
+执行后确保相应的数据类似如下再进行下面步骤，否则请检查网络环境（命令行也需要能访问国际互联网,
+如果google在浏览器能正常访问，但是命令行无法ping通，google搜索关键词**命令行翻墙**，参考配置一下重试。） 如果用的时Clash，在左侧
+General 下，将 TUN Mode 模式开启也可。
+
 ```shell
 root@home:~# wget google.com
 
@@ -58,7 +118,9 @@ Links             : {@{i id=gb_78; class=gbzt;
 ParsedHtml        : mshtml.HTMLDocumentClass
 RawContentLength  : 52716
 ```    
+
 如果是如下显示则代表网络没有配置好，请先按上面说的方法解决再试。
+
 ```shell
 root@home:~# wget google.com
 
@@ -67,10 +129,13 @@ Resolving google.com (google.com)... 142.251.42.238
 Connecting to google.com (google.com)|142.251.42.238|:80... failed: Connection timed out.
 Retrying.
 ```
+
 ### 测试佳明国际区网络连通性
+
 ```shell
 ping sso.garmin.com
 ```
+
 ```shell
 root@home:~# ping sso.garmin.com
 PING sso.garmin.com.cdn.cloudflare.net (104.17.113.66) 56(84) bytes of data.
@@ -81,10 +146,13 @@ PING sso.garmin.com.cdn.cloudflare.net (104.17.113.66) 56(84) bytes of data.
 --- sso.garmin.com.cdn.cloudflare.net ping statistics ---
 
 ```
+
 ### 测试中国区网络连通性
+
 ```shell
 ping sso.garmin.cn
 ```
+
 ```shell
 root@home:~# ping sso.garmin.cn
 PING sso.garmin.cn (61.150.74.194) 56(84) bytes of data.
@@ -96,11 +164,11 @@ PING sso.garmin.cn (61.150.74.194) 56(84) bytes of data.
 
 ```
 
-
 ### 安装 `NodeJS`
 
 下载地址 [https://nodejs.org/en/](https://nodejs.org/en/)
-### 开启 `yarn` 
+
+### 开启 `yarn`
 
 `NodeJS` 安装完毕后，新打开一个管理员命令行窗口， 输入命令执行
 
@@ -109,6 +177,7 @@ corepack enable
 ```
 
 ### 安装依赖
+
 在`README.md`同级目录打开命令行，执行
 
 Windows在文件管理器中打开脚本所在的目录，在地址栏输入 `cmd` 然后回车，即可打开命令行，这个步骤不需要管理员权限
@@ -116,9 +185,12 @@ Windows在文件管理器中打开脚本所在的目录，在地址栏输入 `cm
 ```shell
 yarn
 ```
+
 ### 填入账号密码
+
 打开 `src/constant.ts`,
 填入您的佳明账号及密码
+
 ```js
 //中国区
 export const GARMIN_USERNAME_DEFAULT = 'example@example.com';
@@ -134,21 +206,29 @@ export const GARMIN_MIGRATE_START_DEFAULT = 0; // 从第几条活动开始
 ```
 
 ### 运行脚本
+
 注意： 如果执行不能成功，请尝试将梯子更换为美国IP，多更换几个ip试试
 
 同步中国区到国际区
+
 ```shell
 yarn sync_cn
 ```
+
 同步国际区到中国区
+
 ```shell
 yarn sync_global
 ```
+
 迁移历史数据：中国区到国际区
+
 ```shell
 yarn migrate_garmin_cn_to_global
 ```
+
 迁移历史数据：国际区到中国区
+
 ```shell
 yarn migrate_garmin_global_to_cn
 ```
@@ -158,22 +238,27 @@ yarn migrate_garmin_global_to_cn
 如果上面ping都正常，却仍然不能正常运行，请尝试将梯子更换为美国IP
 
 ## 定时任务(Linux Only)
+
 上面手动执行名称成功迁移后，可以添加定时任务来自动执行
 
-`crontab -e` 打开定时任务编辑，按需添加： 
+`crontab -e` 打开定时任务编辑，按需添加：
 
 ### 每3小时检查并同步国际区到中国区【可选】,注意PATH和SHELL两行也要写上
+
 ```cron
 PATH=$PATH:/usr/local/bin:/usr/bin
 SHELL=/bin/bash
 0 */3 * * * cd /root/code/dailysync/ && yarn --cwd /root/code/dailysync/ sync_global >> /var/log/dailysync.log 2>&1
 ```
+
 ### 每3小时检查并同步中国区到国际区【可选】,注意PATH和SHELL两行也要写上
+
 ```cron
 PATH=$PATH:/usr/local/bin:/usr/bin
 SHELL=/bin/bash
 0 */3 * * * cd /root/code/dailysync/ && yarn --cwd /root/code/dailysync/ sync_cn >> /var/log/dailysync.log 2>&1
 ```
+
 其中 `/root/code/dailysync/`为脚本在机器上的目录地址，更换为您机器上的目录即可
 
 ![](./assets/crontab-e.png)
@@ -185,6 +270,7 @@ tail -100f /var/log/dailysync.log
 ```
 
 ### 修改定时任务执行频率
+
 当前为 `*/10 * * * *` 每 10 分钟执行一次
 
 您可以按需修改， 参考网址 [https://crontab.guru/examples.html](https://crontab.guru/examples.html)
@@ -206,7 +292,8 @@ tail -100f /var/log/dailysync.log
 **如果看不到此文档的图片，请移步 [知乎链接](https://zhuanlan.zhihu.com/p/543799435)**
 
 此工具实现了佳明运动活动数据（生理数据如睡眠，身体电量，**步数**
-等除外）的一次性迁移与日常运动数据同步，实现同步运动数据到到Strava [Strava全球热图](https://www.strava.com/heatmap) 。 额外还实现了RQ数据采集记录跑力的长期趋势及自动签到。
+等除外）的一次性迁移与日常运动数据同步，实现同步运动数据到到Strava [Strava全球热图](https://www.strava.com/heatmap) 。
+额外还实现了RQ数据采集记录跑力的长期趋势及自动签到。
 
 ## 功能
 
@@ -217,13 +304,16 @@ tail -100f /var/log/dailysync.log
 
 ### 同步数据
 
-- 约每20分钟左右检查当前中国区账号中是否有新的运动数据，如有则自动下载上传到国际区，并同步到Strava。 对应 `Action`: `Sync Garmin CN to Garmin Global`
-- 如果您常用的是国际区，想要在国内运动软件（悦跑圈/咕咚/keep/郁金香等等）同步运动数据及微信运动中显示 【Garmin手表 骑行xx分钟】（[微信运动效果](./assets/wx_sport.jpg)）
+- 约每20分钟左右检查当前中国区账号中是否有新的运动数据，如有则自动下载上传到国际区，并同步到Strava。 对应 `Action`:
+  `Sync Garmin CN to Garmin Global`
+- 如果您常用的是国际区，想要在国内运动软件（悦跑圈/咕咚/keep/郁金香等等）同步运动数据及微信运动中显示 【Garmin手表
+  骑行xx分钟】（[微信运动效果](./assets/wx_sport.jpg)）
   此工具可以实现自动反向同步中国区。 对应 `Action`: `Sync Garmin Global to Garmin CN`
-  - 微信步数同步：
-    - `iOS`: 佳明爱运动小程序绑定后，国际区->中国区同步仅能同步活动数据。出去运动不带手机的话，步数会记录在手表中，活动同步后，`Connect`会将步数上传到`健康` App 中，微信与健康应用链接，即可在微信运动中看到步数。
-    - `Android`: 暂无可行方法。
-- 如无特殊需求，强烈建议不要将两个同步脚本同时打开，按需开启一个即可！ 
+    - 微信步数同步：
+        - `iOS`: 佳明爱运动小程序绑定后，国际区->中国区同步仅能同步活动数据。出去运动不带手机的话，步数会记录在手表中，活动同步后，
+          `Connect`会将步数上传到`健康` App 中，微信与健康应用链接，即可在微信运动中看到步数。
+        - `Android`: 暂无可行方法。
+- 如无特殊需求，强烈建议不要将两个同步脚本同时打开，按需开启一个即可！
 
 ## 说明
 
@@ -241,6 +331,7 @@ tail -100f /var/log/dailysync.log
 ![二维码扫码](./assets/wechat_qr.png)
 
 #### update log
+
 1. 2024-01-20: re-enable github actions
 
 2. 2024-03-13: re-enable github actions

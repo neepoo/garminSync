@@ -12,6 +12,7 @@ import {
 } from '../constant';
 import { GarminClientType } from './type';
 import _ from 'lodash';
+import { withGarminRateLimitRetry } from './garmin_rate_limit';
 const decompress = require('decompress');
 
 const unzipper = require('unzipper');
@@ -26,10 +27,11 @@ export const uploadGarminActivity = async (fitFilePath: string, client: GarminCl
         fs.mkdirSync(DOWNLOAD_DIR);
     }
     try {
-        const upload = await client.uploadActivity(fitFilePath);
+        const upload = await withGarminRateLimitRetry('uploadGarminActivity', async () => client.uploadActivity(fitFilePath));
         console.log('upload to garmin activity', upload);
     } catch (error) {
         console.log('upload to garmin activity error', error);
+        throw error;
     }
 };
 
@@ -42,8 +44,14 @@ export const downloadGarminActivity = async (activityId, client: GarminClientTyp
     if (!fs.existsSync(DOWNLOAD_DIR)) {
         fs.mkdirSync(DOWNLOAD_DIR);
     }
-    const activity = await client.getActivity({ activityId: activityId });
-    await client.downloadOriginalActivityData(activity, DOWNLOAD_DIR);
+    const activity = await withGarminRateLimitRetry(
+        'downloadGarminActivity:getActivity',
+        async () => client.getActivity({ activityId: activityId }),
+    );
+    await withGarminRateLimitRetry(
+        'downloadGarminActivity:downloadOriginalActivityData',
+        async () => client.downloadOriginalActivityData(activity, DOWNLOAD_DIR),
+    );
     const originZipFile = DOWNLOAD_DIR + '/' + activityId + '.zip';
     const baseFilePath = `${DOWNLOAD_DIR}/`;
     const unzipped = await decompress(originZipFile, DOWNLOAD_DIR);
@@ -55,7 +63,7 @@ export const downloadGarminActivity = async (activityId, client: GarminClientTyp
 
 export const getGarminStatistics = async (client: GarminClientType): Promise<Record<string, any>> => {
     // Get a list of default length with most recent activities
-    const acts = await client.getActivities(0, 10);
+    const acts = await withGarminRateLimitRetry('getGarminStatistics:getActivities', async () => client.getActivities(0, 10));
     // console.log('acts', acts);
 
     //  跑步 typeKey: 'running'

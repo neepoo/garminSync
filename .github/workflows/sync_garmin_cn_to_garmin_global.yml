@@ -5,9 +5,10 @@ on:
   schedule:
     #  每6小时检查一次
     - cron: "0 */6 * * *"
-  push:
-    branches:
-      - main
+
+concurrency:
+  group: sync-garmin-cn-to-global
+  cancel-in-progress: false
 
 env:
   # please change to your own config.
@@ -22,6 +23,7 @@ env:
   GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
   GARMIN_GLOBAL_USERNAME: ${{ secrets.GARMIN_GLOBAL_USERNAME }}
   GARMIN_GLOBAL_PASSWORD: ${{ secrets.GARMIN_GLOBAL_PASSWORD }}
+  GARMIN_GLOBAL_TOKEN_B64: ${{ secrets.GARMIN_GLOBAL_TOKEN_B64 }}
 
 jobs:
   build:

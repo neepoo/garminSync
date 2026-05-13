@@ -10,7 +10,8 @@ import { downloadGarminActivity, uploadGarminActivity } from './garmin_common';
 import { number2capital } from './number_tricks';
 const core = require('@actions/core');
 import _ from 'lodash';
-import { getTokenSessionFromDB, initDB, upsertSessionToDB } from './sqlite';
+import { getTokenSecretName, getTokenSessionFromDB, getTokenSessionFromEnv, initDB, upsertSessionToDB } from './sqlite';
+import { withGarminRateLimitRetry } from './garmin_rate_limit';
 
 const { GarminConnect } = require('@gooin/garmin-connect');
 
@@ -19,43 +20,69 @@ const GARMIN_GLOBAL_PASSWORD = process.env.GARMIN_GLOBAL_PASSWORD ?? GARMIN_GLOB
 const GARMIN_MIGRATE_NUM = process.env.GARMIN_MIGRATE_NUM ?? GARMIN_MIGRATE_NUM_DEFAULT;
 const GARMIN_MIGRATE_START = process.env.GARMIN_MIGRATE_START ?? GARMIN_MIGRATE_START_DEFAULT;
 const GARMIN_SYNC_NUM = process.env.GARMIN_SYNC_NUM ?? GARMIN_SYNC_NUM_DEFAULT;
+const IS_GITHUB_ACTIONS = process.env.GITHUB_ACTIONS === 'true';
 
 export const getGaminGlobalClient = async (): Promise<GarminClientType> => {
-    if (_.isEmpty(GARMIN_GLOBAL_USERNAME) || _.isEmpty(GARMIN_GLOBAL_PASSWORD)) {
-        const errMsg = '请填写国际区用户名及密码：GARMIN_GLOBAL_USERNAME,GARMIN_GLOBAL_PASSWORD';
-        core.setFailed(errMsg);
-        return Promise.reject(errMsg);
-    }
-
     const GCClient = new GarminConnect({username: GARMIN_GLOBAL_USERNAME, password: GARMIN_GLOBAL_PASSWORD});
 
     try {
         await initDB();
         const persistSession = async () => upsertSessionToDB('GLOBAL', GCClient.exportToken());
+        const loadReusableToken = async (source: string, session: { oauth1: Record<string, any>, oauth2: Record<string, any> }) => {
+            console.log(`GarminGlobal: login by ${source}`);
+            GCClient.loadToken(session.oauth1, session.oauth2);
+            const loadedUserInfo = await withGarminRateLimitRetry(
+                `GarminGlobal ${source}`,
+                async () => GCClient.getUserProfile(),
+            );
+            await persistSession();
+            return loadedUserInfo;
+        };
+        const buildGithubActionsError = (lastError?: unknown) => {
+            const detail = lastError instanceof Error ? ` 最近一次校验错误：${lastError.message}` : '';
+            return `GitHub Actions 中已禁用 Garmin Global 账号密码登录，以避免 429。请先在本地运行 yarn bootstrap_garmin_global_token，生成并更新 GitHub Secret ${getTokenSecretName('GLOBAL')}，再重新运行 workflow。${detail}`;
+        };
         let userInfo;
+        let lastReusableTokenError: unknown;
 
         const currentSession = await getTokenSessionFromDB('GLOBAL');
-        if (!currentSession) {
-            await GCClient.login();
-            await persistSession();
-            userInfo = await GCClient.getUserProfile();
-        } else {
-            //  Wrap error message in GCClient, prevent terminate in github actions.
+        if (currentSession) {
             try {
-                console.log('GarminGlobal: login by saved session');
-                GCClient.loadToken(currentSession.oauth1, currentSession.oauth2);
-                userInfo = await GCClient.getUserProfile();
-                await persistSession();
+                userInfo = await loadReusableToken('saved session', currentSession);
             } catch (e) {
-                // 只在登录默认session登录失败，catch到登录错误，需要重新登录时注册sessionChange事件
-                console.log('Warn: renew GarminGlobal session..');
-                await GCClient.login();
-                await persistSession();
-                userInfo = await GCClient.getUserProfile();
+                lastReusableTokenError = e;
+                console.log('Warn: saved GarminGlobal session expired.');
+            }
+        }
 
+        const secretSession = getTokenSessionFromEnv('GLOBAL');
+        if (!userInfo && secretSession) {
+            try {
+                userInfo = await loadReusableToken(getTokenSecretName('GLOBAL'), secretSession);
+            } catch (e) {
+                lastReusableTokenError = e;
+                console.log(`Warn: ${getTokenSecretName('GLOBAL')} expired or invalid.`);
+            }
+        }
+
+        if (!userInfo && IS_GITHUB_ACTIONS) {
+            throw new Error(buildGithubActionsError(lastReusableTokenError));
+        }
+
+        if (!userInfo) {
+            if (_.isEmpty(GARMIN_GLOBAL_USERNAME) || _.isEmpty(GARMIN_GLOBAL_PASSWORD)) {
+                const errMsg = `请填写国际区用户名及密码：GARMIN_GLOBAL_USERNAME,GARMIN_GLOBAL_PASSWORD，或配置 ${getTokenSecretName('GLOBAL')}`;
+                core.setFailed(errMsg);
+                return Promise.reject(errMsg);
             }
 
+            userInfo = await withGarminRateLimitRetry('GarminGlobal login', async () => {
+                await GCClient.login();
+                await persistSession();
+                return GCClient.getUserProfile();
+            });
         }
+
         const { fullName, userName: emailAddress, location } = userInfo;
         if (!emailAddress) {
             throw Error('佳明国际区登录失败，请检查填入的账号密码或您的网络环境')
@@ -78,7 +105,10 @@ export const migrateGarminGlobal2GarminCN = async (count = 200) => {
     const clientCn = await getGaminCNClient();
 
     // 从佳明国际区读取活动数据
-    const actSlices = await clientGlobal.getActivities(actIndex, totalAct);
+    const actSlices = await withGarminRateLimitRetry(
+        'migrateGarminGlobal2GarminCN:getActivities',
+        async () => clientGlobal.getActivities(actIndex, totalAct),
+    );
     // only running
     // const runningActs = _.filter(actSlices, { activityType: { typeKey: 'running' } });
 
@@ -99,8 +129,14 @@ export const syncGarminGlobal2GarminCN = async () => {
     const clientCN = await getGaminCNClient();
     const clientGlobal = await getGaminGlobalClient();
 
-    const cnActs = await clientCN.getActivities(0, 1);
-    let globalActs = await clientGlobal.getActivities(0, Number(GARMIN_SYNC_NUM));
+    const cnActs = await withGarminRateLimitRetry(
+        'syncGarminGlobal2GarminCN:getCnActivities',
+        async () => clientCN.getActivities(0, 1),
+    );
+    let globalActs = await withGarminRateLimitRetry(
+        'syncGarminGlobal2GarminCN:getGlobalActivities',
+        async () => clientGlobal.getActivities(0, Number(GARMIN_SYNC_NUM)),
+    );
 
     const latestGlobalActStartTime = globalActs[0]?.startTimeLocal ?? '0';
     const latestCnActStartTime = cnActs[0]?.startTimeLocal ?? '0';

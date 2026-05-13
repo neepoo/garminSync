@@ -17,6 +17,10 @@ export interface GarminTokenSession {
     oauth1: Record<string, any>;
     oauth2: Record<string, any>;
 }
+const TOKEN_SECRET_BY_REGION: Record<GarminRegion, string> = {
+    CN: 'GARMIN_TOKEN_B64',
+    GLOBAL: 'GARMIN_GLOBAL_TOKEN_B64',
+};
 
 const isRecord = (value: unknown): value is Record<string, any> =>
     typeof value === 'object' && value !== null;
@@ -24,7 +28,7 @@ const isRecord = (value: unknown): value is Record<string, any> =>
 const getSessionUser = (type: GarminRegion) =>
     type === 'GLOBAL' ? GARMIN_GLOBAL_USERNAME : GARMIN_USERNAME;
 
-const normalizeTokenSession = (session: unknown): GarminTokenSession | undefined => {
+export const normalizeTokenSession = (session: unknown): GarminTokenSession | undefined => {
     if (!isRecord(session)) {
         return undefined;
     }
@@ -62,6 +66,23 @@ const normalizeTokenSession = (session: unknown): GarminTokenSession | undefined
     }
 
     return undefined;
+};
+
+export const getTokenSecretName = (type: GarminRegion) => TOKEN_SECRET_BY_REGION[type];
+
+const parseTokenSession = (raw: string, type: GarminRegion): GarminTokenSession => {
+    const normalizedRaw = raw.trim();
+    const decoded = normalizedRaw.startsWith('{')
+        ? normalizedRaw
+        : Buffer.from(normalizedRaw, 'base64').toString('utf8');
+    const parsed = JSON.parse(decoded);
+    const tokenSession = normalizeTokenSession(parsed);
+
+    if (!tokenSession) {
+        throw new Error(`环境变量 ${getTokenSecretName(type)} 不是合法的 Garmin token bundle`);
+    }
+
+    return tokenSession;
 };
 
 export const initDB = async () => {
@@ -152,6 +173,20 @@ export const getTokenSessionFromDB = async (type: GarminRegion): Promise<GarminT
     }
 
     return tokenSession;
+};
+
+export const getTokenSessionFromEnv = (type: GarminRegion): GarminTokenSession | undefined => {
+    const rawToken = process.env[getTokenSecretName(type)];
+    if (!rawToken?.trim()) {
+        return undefined;
+    }
+
+    try {
+        return parseTokenSession(rawToken, type);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`读取 ${getTokenSecretName(type)} 失败：${message}`);
+    }
 };
 
 export const encryptSession = (session: Record<string, any>): string => {
