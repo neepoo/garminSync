@@ -39,7 +39,7 @@ jobs:
         with:
           node-version: '22'
           cache: 'yarn'
-      - run: yarn
+      - run: yarn install --frozen-lockfile --non-interactive
       - run: yarn sync_cn
         timeout-minutes: 5
       - uses: stefanzweifel/git-auto-commit-action@v5

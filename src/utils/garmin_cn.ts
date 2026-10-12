@@ -13,7 +13,7 @@ import { number2capital } from './number_tricks';
 const core = require('@actions/core');
 import _ from 'lodash';
 import { getTokenSecretName, getTokenSessionFromDB, getTokenSessionFromEnv, initDB, upsertSessionToDB } from './sqlite';
-import { withGarminRateLimitRetry } from './garmin_rate_limit';
+import { isGarminAuthenticationError, withGarminRateLimitRetry, withGarminReadRetry } from './garmin_rate_limit';
 
 const CryptoJS = require('crypto-js');
 const fs = require('fs');
@@ -35,7 +35,7 @@ export const getGaminCNClient = async (): Promise<GarminClientType> => {
         const loadReusableToken = async (source: string, session: { oauth1: Record<string, any>, oauth2: Record<string, any> }) => {
             console.log(`GarminCN: login by ${source}`);
             GCClient.loadToken(session.oauth1, session.oauth2);
-            const loadedUserInfo = await withGarminRateLimitRetry(
+            const loadedUserInfo = await withGarminReadRetry(
                 `GarminCN ${source}`,
                 async () => GCClient.getUserProfile(),
             );
@@ -49,6 +49,7 @@ export const getGaminCNClient = async (): Promise<GarminClientType> => {
             try {
                 userInfo = await loadReusableToken('saved session', currentSession);
             } catch (e) {
+                if (!isGarminAuthenticationError(e)) throw e;
                 console.log('Warn: saved GarminCN session expired.');
             }
         }
@@ -58,6 +59,7 @@ export const getGaminCNClient = async (): Promise<GarminClientType> => {
             try {
                 userInfo = await loadReusableToken(getTokenSecretName('CN'), secretSession);
             } catch (e) {
+                if (!isGarminAuthenticationError(e)) throw e;
                 console.log(`Warn: ${getTokenSecretName('CN')} expired or invalid.`);
             }
         }
@@ -69,7 +71,7 @@ export const getGaminCNClient = async (): Promise<GarminClientType> => {
                 return Promise.reject(errMsg);
             }
 
-            userInfo = await withGarminRateLimitRetry('GarminCN login', async () => {
+            userInfo = await withGarminReadRetry('GarminCN login', async () => {
                 await GCClient.login();
                 await persistSession();
                 return GCClient.getUserProfile();
@@ -84,7 +86,8 @@ export const getGaminCNClient = async (): Promise<GarminClientType> => {
 
         return GCClient;
     } catch (err) {
-        console.error(err);
+        // Axios errors include request headers and credentials; log only the message.
+        console.error(err instanceof Error ? err.message : String(err));
         core.setFailed(err instanceof Error ? err.message : String(err));
         throw err;
     }

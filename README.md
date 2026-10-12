@@ -81,6 +81,26 @@ GARMIN_GLOBAL_TOKEN_B64
 
 ## 本地运行方案
 
+### 同步工作流的网络错误与本地验证
+
+中国区登录偶发的 `Cannot read properties of undefined (reading 'status')` 来自
+`@gooin/garmin-connect@1.6.1` 的网络错误处理。项目通过 `postinstall` 自动应用兼容补丁，
+保留原始网络错误，并修复 token 刷新失败后的等待状态。安装时请保留生命周期脚本：
+
+```shell
+yarn install --frozen-lockfile --non-interactive
+yarn test
+yarn typecheck
+```
+
+登录和已保存 session 的校验遇到临时网络故障或 HTTP 408/500/502/503/504 时，最多重试 3 次，
+分别等待 2、4、8 秒；HTTP 429 保持 30、60、90 秒的等待。只有 HTTP 401/403 才会进入
+下一种认证方式。网络重试耗尽后仍会报告失败及原始错误，不会误报 token 过期。
+上传仅保留原有的 429 重试，避免响应丢失后重复上传活动。
+
+`Verify Garmin sync` 工作流在代码变更时运行这些离线回归测试和类型检查，不需要账号 Secret。
+升级 Garmin 依赖前需要重新审查兼容补丁；版本或拦截器结构不匹配时安装会明确失败。
+
 首先确保运行此脚本的机器能够访问国际互联网, 如国外VPS、家庭全局科学的环境等， 否则无法正常登录佳明国际区
 
 ## 检查网络情况确保正常访问佳明服务
