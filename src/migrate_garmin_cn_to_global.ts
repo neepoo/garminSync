@@ -1,5 +1,6 @@
 import { BARK_KEY_DEFAULT } from './constant';
 import { migrateGarminCN2GarminGlobal } from './utils/garmin_cn';
+import { formatGarminError } from './utils/garmin_rate_limit';
 
 const axios = require('axios');
 const core = require('@actions/core');
@@ -9,10 +10,10 @@ const main = async () => {
     try {
         await migrateGarminCN2GarminGlobal();
     } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = formatGarminError(error);
         if (BARK_KEY) {
             await axios.get(
-                `https://api.day.app/${BARK_KEY}/Garmin CN -> Garmin Global 同步数据运行失败了，快去检查！/${message}`
+                `https://api.day.app/${BARK_KEY}/Garmin CN -> Garmin Global 同步数据运行失败了，快去检查！/${encodeURIComponent(message)}`
             );
         }
         core.setFailed(message);
@@ -21,7 +22,3 @@ const main = async () => {
 };
 
 main();
-
-
-
-

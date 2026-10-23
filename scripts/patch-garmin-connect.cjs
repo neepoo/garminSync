@@ -10,15 +10,30 @@ if (version !== '1.6.1') {
 }
 const filename = path.join(path.dirname(packagePath), 'dist/common/HttpClient.js');
 let source = fs.readFileSync(filename, 'utf8');
-const marker = '// garminSync: preserve transport errors and isolate token refresh';
+const marker = '// garminSync: preserve transport errors, isolate token refresh, and relax Happy Eyeballs timeout';
 if (source.includes(marker)) process.exit(0);
 
-const start = source.indexOf('            if (error.response.status === 401 && !originalRequest._retry) {');
+const start = source.indexOf('        this.client = axios_1.default.create();');
 const end = source.indexOf('            if (axios_1.default.isAxiosError(error)) {', start);
 if (start < 0 || end < 0) throw new Error('Garmin HTTP interceptor changed; review compatibility patch');
-source = source.slice(0, start) + `            ${marker}
+source = source.slice(0, start) + `        ${marker}
+        const dns = require('node:dns');
+        const net = require('node:net');
+        if (typeof dns.setDefaultResultOrder === 'function') {
+            dns.setDefaultResultOrder('ipv4first');
+        }
+        if (typeof net.getDefaultAutoSelectFamilyAttemptTimeout === 'function' &&
+            typeof net.setDefaultAutoSelectFamilyAttemptTimeout === 'function' &&
+            net.getDefaultAutoSelectFamilyAttemptTimeout() < 10000) {
+            net.setDefaultAutoSelectFamilyAttemptTimeout(10000);
+        }
+        this.client = axios_1.default.create({ timeout: 30000 });
+        this.client.interceptors.response.use((response) => response, async (error) => {
+            const originalRequest = error.config;
             if (!error.response) throw error;
-            if (error.response.status === 401 && !originalRequest._retry &&
+            const isOauthRequest = typeof (originalRequest && originalRequest.url) === 'string' &&
+                originalRequest.url.includes('/oauth-service/oauth/');
+            if (error.response.status === 401 && !originalRequest._retry && !isOauthRequest &&
                 (this.oauth2Token || this.refreshPromise)) {
                 originalRequest._retry = true;
                 if (!this.refreshPromise) {

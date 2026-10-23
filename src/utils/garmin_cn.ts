@@ -13,7 +13,7 @@ import { number2capital } from './number_tricks';
 const core = require('@actions/core');
 import _ from 'lodash';
 import { getTokenSecretName, getTokenSessionFromDB, getTokenSessionFromEnv, initDB, upsertSessionToDB } from './sqlite';
-import { isGarminAuthenticationError, withGarminRateLimitRetry, withGarminReadRetry } from './garmin_rate_limit';
+import { formatGarminError, isGarminAuthenticationError, withGarminReadRetry } from './garmin_rate_limit';
 
 const CryptoJS = require('crypto-js');
 const fs = require('fs');
@@ -87,8 +87,8 @@ export const getGaminCNClient = async (): Promise<GarminClientType> => {
         return GCClient;
     } catch (err) {
         // Axios errors include request headers and credentials; log only the message.
-        console.error(err instanceof Error ? err.message : String(err));
-        core.setFailed(err instanceof Error ? err.message : String(err));
+        console.error(formatGarminError(err));
+        core.setFailed(formatGarminError(err));
         throw err;
     }
 };
@@ -101,7 +101,7 @@ export const migrateGarminCN2GarminGlobal = async (count = 200) => {
     const clientCN = await getGaminCNClient();
     const clientGlobal = await getGaminGlobalClient();
 
-    const actSlices = await withGarminRateLimitRetry(
+    const actSlices = await withGarminReadRetry(
         'migrateGarminCN2GarminGlobal:getActivities',
         async () => clientCN.getActivities(actIndex, totalAct),
     );
@@ -125,11 +125,11 @@ export const syncGarminCN2GarminGlobal = async () => {
     const clientCN = await getGaminCNClient();
     const clientGlobal = await getGaminGlobalClient();
 
-    let cnActs = await withGarminRateLimitRetry(
+    let cnActs = await withGarminReadRetry(
         'syncGarminCN2GarminGlobal:getCnActivities',
         async () => clientCN.getActivities(0, Number(GARMIN_SYNC_NUM)),
     );
-    const globalActs = await withGarminRateLimitRetry(
+    const globalActs = await withGarminReadRetry(
         'syncGarminCN2GarminGlobal:getGlobalActivities',
         async () => clientGlobal.getActivities(0, 1),
     );

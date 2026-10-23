@@ -63,3 +63,27 @@ test('read retries fail immediately for auth, privacy, and programming errors', 
         assert.deepEqual(delays, []);
     });
 });
+
+test('read retries handle dual-stack AggregateError and format a non-empty message', async () => {
+    await withoutWaiting(async delays => {
+        const aggregate = Object.assign(
+            new AggregateError([
+                Object.assign(new Error('connect ETIMEDOUT 42.202.211.202:443'), { code: 'ETIMEDOUT' }),
+                Object.assign(new Error('connect ENETUNREACH 240e:b1:9801:20d:3d08:cc54:fba7:fffe:443'), { code: 'ENETUNREACH' }),
+            ]),
+            { code: 'ETIMEDOUT' },
+        );
+        assert.equal(aggregate.message, '');
+        assert.match(retry.formatGarminError(aggregate), /connect ETIMEDOUT 42\.202\.211\.202:443/);
+        assert.match(retry.formatGarminError(aggregate), /connect ENETUNREACH 240e:/);
+
+        let attempts = 0;
+        const value = await retry.withGarminReadRetry('profile', async () => {
+            if (++attempts === 1) throw aggregate;
+            return 'ok';
+        });
+        assert.equal(value, 'ok');
+        assert.equal(attempts, 2);
+        assert.deepEqual(delays, [2000]);
+    });
+});

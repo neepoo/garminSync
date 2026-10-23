@@ -79,6 +79,25 @@ GARMIN_GLOBAL_TOKEN_B64
 - 如果 `GARMIN_GLOBAL_TOKEN_B64` 也失效了，workflow 会明确报错，并提示你重新执行 `yarn bootstrap_garmin_global_token` 更新
   Secret。
 
+### Garmin Global 上传出现 412 Privacy Consent 的处理方法
+
+如果 workflow 已经成功登录 Garmin Global，但上传活动时报错：
+
+```text
+ERROR: (412), Precondition Failed
+The user is from CN location, but did not provide Privacy Consent
+```
+
+这通常不是代码问题，而是 Garmin 账号还没有开通上传授权。处理步骤：
+
+1. 登录 `https://connect.garmin.com/modern/settings`
+2. 找到 **Data**
+3. 启用 **Device Upload**
+4. 如果页面弹出隐私授权或跨境数据相关提示，按 Garmin 要求完成确认
+5. 保存后重新运行 workflow
+
+这类授权通常只需要做一次。完成后，后续 FIT 文件上传就可以继续正常同步。
+
 ## 本地运行方案
 
 ### 同步工作流的网络错误与本地验证

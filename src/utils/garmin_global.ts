@@ -11,7 +11,7 @@ import { number2capital } from './number_tricks';
 const core = require('@actions/core');
 import _ from 'lodash';
 import { getTokenSecretName, getTokenSessionFromDB, getTokenSessionFromEnv, initDB, upsertSessionToDB } from './sqlite';
-import { isGarminAuthenticationError, withGarminRateLimitRetry, withGarminReadRetry } from './garmin_rate_limit';
+import { formatGarminError, isGarminAuthenticationError, withGarminReadRetry } from './garmin_rate_limit';
 
 const { GarminConnect } = require('@gooin/garmin-connect');
 
@@ -39,7 +39,7 @@ export const getGaminGlobalClient = async (): Promise<GarminClientType> => {
             return loadedUserInfo;
         };
         const buildGithubActionsError = (lastError?: unknown) => {
-            const detail = lastError instanceof Error ? ` 最近一次校验错误：${lastError.message}` : '';
+            const detail = lastError !== undefined ? ` 最近一次校验错误：${formatGarminError(lastError)}` : '';
             return `GitHub Actions 中已禁用 Garmin Global 账号密码登录，以避免 429。请先在本地运行 yarn bootstrap_garmin_global_token，生成并更新 GitHub Secret ${getTokenSecretName('GLOBAL')}，再重新运行 workflow。${detail}`;
         };
         let userInfo;
@@ -93,8 +93,8 @@ export const getGaminGlobalClient = async (): Promise<GarminClientType> => {
         return GCClient;
     } catch (err) {
         // Axios errors include request headers and credentials; log only the message.
-        console.error(err instanceof Error ? err.message : String(err));
-        core.setFailed(err instanceof Error ? err.message : String(err));
+        console.error(formatGarminError(err));
+        core.setFailed(formatGarminError(err));
         throw err;
     }
 };
@@ -108,7 +108,7 @@ export const migrateGarminGlobal2GarminCN = async (count = 200) => {
     const clientCn = await getGaminCNClient();
 
     // 从佳明国际区读取活动数据
-    const actSlices = await withGarminRateLimitRetry(
+    const actSlices = await withGarminReadRetry(
         'migrateGarminGlobal2GarminCN:getActivities',
         async () => clientGlobal.getActivities(actIndex, totalAct),
     );
@@ -132,11 +132,11 @@ export const syncGarminGlobal2GarminCN = async () => {
     const clientCN = await getGaminCNClient();
     const clientGlobal = await getGaminGlobalClient();
 
-    const cnActs = await withGarminRateLimitRetry(
+    const cnActs = await withGarminReadRetry(
         'syncGarminGlobal2GarminCN:getCnActivities',
         async () => clientCN.getActivities(0, 1),
     );
-    let globalActs = await withGarminRateLimitRetry(
+    let globalActs = await withGarminReadRetry(
         'syncGarminGlobal2GarminCN:getGlobalActivities',
         async () => clientGlobal.getActivities(0, Number(GARMIN_SYNC_NUM)),
     );

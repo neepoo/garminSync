@@ -72,6 +72,23 @@ for (const [region, factory] of [['CN', getGaminCNClient], ['GLOBAL', getGaminGl
         });
     });
 
+    test(`${region} logs non-empty detail when an AggregateError has an empty message`, async () => {
+        await withSessionFixture(async state => {
+            const failure = Object.assign(
+                new AggregateError([
+                    Object.assign(new Error('connect ETIMEDOUT 42.202.211.202:443'), { code: 'ETIMEDOUT' }),
+                    Object.assign(new Error('connect ENETUNREACH 240e::1:443'), { code: 'ENETUNREACH' }),
+                ]),
+                { code: 'ETIMEDOUT', config: { headers: { Authorization: 'Bearer test-private-token' } } },
+            );
+            GarminConnect.prototype.getUserProfile = async () => { throw failure; };
+            await assert.rejects(factory(), error => error === failure);
+            const logged = JSON.stringify(state.errors());
+            assert.match(logged, /connect ETIMEDOUT 42\.202\.211\.202:443/);
+            assert.ok(!logged.includes('test-private-token'));
+        });
+    });
+
     test(`${region} falls back to the token secret on an authentication failure`, async () => {
         const secretName = region === 'CN' ? 'GARMIN_TOKEN_B64' : 'GARMIN_GLOBAL_TOKEN_B64';
         const previous = process.env[secretName];

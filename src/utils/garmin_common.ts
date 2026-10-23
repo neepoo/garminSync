@@ -12,10 +12,18 @@ import {
 } from '../constant';
 import { GarminClientType } from './type';
 import _ from 'lodash';
-import { withGarminRateLimitRetry } from './garmin_rate_limit';
+import { formatGarminError, withGarminRateLimitRetry, withGarminReadRetry } from './garmin_rate_limit';
 const decompress = require('decompress');
 
 const unzipper = require('unzipper');
+
+const isGarminPrivacyConsentError = (error: unknown): boolean => {
+    const message = formatGarminError(error);
+    return /did not provide Privacy Consent/i.test(message);
+};
+
+const getGarminPrivacyConsentMessage = () =>
+    'Garmin Global 拒绝上传：当前账号缺少隐私上传授权。请先登录 https://connect.garmin.com/modern/settings ，滚动到 Data，启用 Device Upload，并按 Garmin 提示完成一次 Privacy Consent，然后重新运行同步。';
 
 /**
  * 上传 .fit file
@@ -31,6 +39,9 @@ export const uploadGarminActivity = async (fitFilePath: string, client: GarminCl
         console.log('upload to garmin activity', upload);
     } catch (error) {
         console.log('upload to garmin activity error', error);
+        if (isGarminPrivacyConsentError(error)) {
+            throw new Error(getGarminPrivacyConsentMessage());
+        }
         throw error;
     }
 };
@@ -44,11 +55,11 @@ export const downloadGarminActivity = async (activityId, client: GarminClientTyp
     if (!fs.existsSync(DOWNLOAD_DIR)) {
         fs.mkdirSync(DOWNLOAD_DIR);
     }
-    const activity = await withGarminRateLimitRetry(
+    const activity = await withGarminReadRetry(
         'downloadGarminActivity:getActivity',
         async () => client.getActivity({ activityId: activityId }),
     );
-    await withGarminRateLimitRetry(
+    await withGarminReadRetry(
         'downloadGarminActivity:downloadOriginalActivityData',
         async () => client.downloadOriginalActivityData(activity, DOWNLOAD_DIR),
     );
@@ -63,7 +74,7 @@ export const downloadGarminActivity = async (activityId, client: GarminClientTyp
 
 export const getGarminStatistics = async (client: GarminClientType): Promise<Record<string, any>> => {
     // Get a list of default length with most recent activities
-    const acts = await withGarminRateLimitRetry('getGarminStatistics:getActivities', async () => client.getActivities(0, 10));
+    const acts = await withGarminReadRetry('getGarminStatistics:getActivities', async () => client.getActivities(0, 10));
     // console.log('acts', acts);
 
     //  跑步 typeKey: 'running'

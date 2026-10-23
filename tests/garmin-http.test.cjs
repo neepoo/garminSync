@@ -74,3 +74,32 @@ test('concurrent requests share a failed refresh and both reject', { timeout: 20
         assert.equal(result.reason, failure);
     }
 });
+
+test('a 401 from OAuth token exchange rejects instead of deadlocking refreshPromise', { timeout: 2000 }, async () => {
+    const client = new GarminConnect({ username: 'test', password: 'test' });
+    const http = client.client;
+    http.OAUTH_CONSUMER = { key: 'consumer-key', secret: 'consumer-secret' };
+    http.oauth1Token = { oauth_token: 'expired-oauth1', oauth_token_secret: 'secret' };
+    http.oauth2Token = { access_token: 'expired-oauth2' };
+    http.client.defaults.adapter = async config => {
+        throw Object.assign(new Error('Unauthorized'), {
+            config,
+            isAxiosError: true,
+            response: { status: 401, statusText: 'Unauthorized', data: {} },
+        });
+    };
+    await assert.rejects(client.getUserProfile(), /\(401\)/);
+});
+
+test('Garmin HTTP client relaxes Happy Eyeballs timeout for cross-border CN connections', () => {
+    const dns = require('node:dns');
+    const net = require('node:net');
+    const client = new GarminConnect({ username: 'test', password: 'test' }, 'garmin.cn');
+    assert.equal(client.client.client.defaults.timeout, 30000);
+    if (typeof dns.getDefaultResultOrder === 'function') {
+        assert.equal(dns.getDefaultResultOrder(), 'ipv4first');
+    }
+    if (typeof net.getDefaultAutoSelectFamilyAttemptTimeout === 'function') {
+        assert.ok(net.getDefaultAutoSelectFamilyAttemptTimeout() >= 10000);
+    }
+});
